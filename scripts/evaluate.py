@@ -8,10 +8,11 @@
    liked in the test period (the "I'm eating beef tonight" of the request). Every method
    receives the same dish.
 
-2. Feedback curve: test users with at least 11 test positives are treated as NEW users:
-   their train history is removed from the graph, they keep their questionnaire, and they
-   give their first n liked wines as feedback (n = 0, 1, 3, 5, 10). We rank for them and
-   measure NDCG@10 on their later liked wines (the same truth for every n).
+2. Feedback curve: every test user with enough liked wines in train is treated as a NEW
+   user: their whole train history is removed from the graph, they keep their
+   questionnaire, and they give back their n most recent liked wines (before the train
+   cut date) as feedback, n = 0, 1, 3, 5, 10 (--steps). We rank for them and measure
+   NDCG@10 on their liked wines of the TEST period (the same truth for every n).
 
 Example:
     python scripts/evaluate.py --data data/processed/full \
@@ -35,7 +36,7 @@ from sommelier.models.baselines import (dish_scorer, dish_wines_mask, most_popul
                                         questionnaire_scorer, random_scorer, wine_attributes)
 from sommelier.serving.predict import embeddings, load_model  # noqa: E402
 
-FEEDBACK_STEPS = [0, 1, 3, 5, 10]
+FEEDBACK_STEPS = [0, 1, 3, 5, 10]     # changed with --steps
 
 
 def context_dish_per_user(test, ckg, attrs):
@@ -89,20 +90,24 @@ def model_scorer(model, Z, user_dish=None, attrs=None):
 
 # --------------------------------------------------------------------------- feedback curve
 
-def feedback_users(test, ckg, max_users, rng):
-    """Users with >= 11 test positives: first 10 (by date) = possible feedback, rest = truth."""
-    test = test.sort_values("Date")
-    per_user = {}
-    for user_id, wine_id in zip(test["UserID"], test["WineID"]):
-        u = ckg.user_index.get(int(user_id))
-        w = ckg.wine_index.get(int(wine_id))
-        if u is not None and w is not None:
-            per_user.setdefault(u, []).append(w)
-    users = [u for u, wines in per_user.items() if len(wines) >= max(FEEDBACK_STEPS) + 1]
+def feedback_users(ds, max_users, rng):
+    """Test users with at least max(steps) liked wines in train.
+
+    feedback[u] = their most recent liked wines of the train period (most recent first),
+    truth[u]    = their liked wines of the test period.
+    """
+    ckg = ds.ckg
+    liked = ds.train[ds.train["liked"]].sort_values("Date", ascending=False)
+    recent = {}
+    for user_id, wine_id in zip(liked["UserID"], liked["WineID"]):
+        u = ckg.user_index[int(user_id)]
+        recent.setdefault(u, []).append(ckg.wine_index[int(wine_id)])
+    need = max(FEEDBACK_STEPS)
+    users = [u for u in sorted(ds.test_truth) if len(recent.get(u, [])) >= need]
     if len(users) > max_users:
-        users = rng.choice(users, size=max_users, replace=False).tolist()
-    feedback = {u: per_user[u][:max(FEEDBACK_STEPS)] for u in users}
-    truth = {u: set(per_user[u][max(FEEDBACK_STEPS):]) for u in users}
+        users = sorted(rng.choice(users, size=max_users, replace=False).tolist())
+    feedback = {u: recent[u][:need] for u in users}
+    truth = {u: ds.test_truth[u] for u in users}
     return feedback, truth
 
 
@@ -124,8 +129,9 @@ def edges_for_new_users(ckg, feedback, n):
 
 def feedback_curve(models, ds, attrs, answers, max_users, rng, log):
     ckg = ds.ckg
-    feedback, truth = feedback_users(ds.test, ckg, max_users, rng)
-    log(f"feedback curve: {len(truth)} test users with >= {max(FEEDBACK_STEPS) + 1} test positives")
+    feedback, truth = feedback_users(ds, max_users, rng)
+    log(f"feedback curve: steps {FEEDBACK_STEPS}, {len(truth)} test users with "
+        f">= {max(FEEDBACK_STEPS)} liked wines in train")
     if not truth:
         return {}
     liked = ds.train_liked[1].numpy()
@@ -159,7 +165,7 @@ def plot_curve(result, path):
         ax.plot(result["steps"], values, style, marker="o", label=name)
     ax.set_xticks(result["steps"])
     ax.set_xlabel("feedback given by a new user (liked wines)")
-    ax.set_ylabel("NDCG@10 on their later wines")
+    ax.set_ylabel("NDCG@10 on their test-period wines")
     ax.set_title(f"Recommendations improve with feedback ({result['users']} test users)")
     ax.grid(alpha=0.3)
     ax.legend(fontsize=8)
@@ -175,8 +181,11 @@ def main():
                    help="trained model folders (the first one is the main model)")
     p.add_argument("--out", default="artifacts/results_full")
     p.add_argument("--max-curve-users", type=int, default=2000)
+    p.add_argument("--steps", type=int, nargs="+", default=FEEDBACK_STEPS,
+                   help="numbers of feedback for the curve (default 0 1 3 5 10)")
     p.add_argument("--seed", type=int, default=42)
     a = p.parse_args()
+    FEEDBACK_STEPS[:] = sorted(a.steps)
     log = lambda m: print(m, flush=True)
     rng = np.random.default_rng(a.seed)
     out = ROOT / a.out
