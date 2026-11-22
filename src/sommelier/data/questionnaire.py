@@ -10,6 +10,9 @@ Answers:
     grapes     the 3 most frequent grapes
     countries  the 2 most frequent countries
     discovery  "explorer" if the liked wines are less popular than the median wine, else "safe"
+
+Noise: real people answer imperfectly. Each answer is removed with probability DROP,
+or replaced by a random valid value with probability SWAP.
 """
 from collections import Counter
 

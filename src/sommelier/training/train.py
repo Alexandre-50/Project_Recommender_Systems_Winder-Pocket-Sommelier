@@ -80,8 +80,9 @@ def train(data_dir, out_dir, epochs=30, batch_size=16384, lr=5e-3, dim=64, beta=
                   use_questionnaire=use_questionnaire, use_hgib=use_hgib, use_gre=use_gre)
     (out / "config.json").write_text(json.dumps(config, indent=2))
 
-    model = HGIBKGAT(ckg, dim=dim, beta=beta, use_gre=use_gre,
-                     use_questionnaire=use_questionnaire, use_hgib=use_hgib)
+    # layer sizes follow dim: 64 -> (64, 32, 16), 32 -> (32, 16, 8). Use --dim 32 on 8 GB of RAM.
+    model = HGIBKGAT(ckg, dim=dim, layer_dims=(dim, dim // 2, dim // 4), beta=beta,
+                     use_gre=use_gre, use_questionnaire=use_questionnaire, use_hgib=use_hgib)
     opt = torch.optim.Adam(model.parameters(), lr=lr)
     log(f"graph: {ckg.n_users} users, {ckg.n_wines} wines, "
         f"{ckg.n_nodes - ckg.n_users - ckg.n_wines} taste/KG nodes | "

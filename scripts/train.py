@@ -27,7 +27,8 @@ def main():
     p.add_argument("--epochs", type=int, default=30)
     p.add_argument("--batch-size", type=int, default=16384)
     p.add_argument("--lr", type=float, default=5e-3)
-    p.add_argument("--dim", type=int, default=64)
+    p.add_argument("--dim", type=int, default=64,
+                   help="embedding size; 32 halves the memory (needed on 8 GB of RAM)")
     p.add_argument("--beta", type=float, default=0.1, help="weight of the HSIC bottleneck term")
     p.add_argument("--patience", type=int, default=3, help="early stopping patience (epochs)")
     p.add_argument("--max-eval-users", type=int, default=3000)
